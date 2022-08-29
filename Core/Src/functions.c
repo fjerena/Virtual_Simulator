@@ -189,3 +189,27 @@ void HAL_TIM_OC_DelayElapsedCallback(TIM_HandleTypeDef *htim)
         GenerateTooth();
     }
 }
+
+
+/*
+ 	//Start
+ 	HAL_GPIO_WritePin(GPIOC,GPIO_PIN_13,GPIO_PIN_RESET);
+ 	HAL_GPIO_WritePin(GPIOC,GPIO_PIN_13|GPIO_PIN_14,GPIO_PIN_SET);
+ 	ChangeTableLine(0);
+
+ 	//Treat interrupt
+ 	void GeneratePeriod(void)
+	{
+ 		if((nOverflowTMR3==0)&&(nTargetRemainTMR3!=0))
+		{
+ 			__HAL_TIM_SET_COMPARE(&htim3,TIM_CHANNEL_1,nTargetRemainTMR3);
+ 		}
+
+ 		if((nOverflowTMR3!=0)&&(nTargetRemainTMR3==0))
+ 		{
+ 			if(nOverflowTMR3==nTargetOverflowTMR3)
+			{
+ 				HAL_GPIO_Toggle((GPIOC,GPIO_PIN_13);
+ 			}
+ 		}
+ */
