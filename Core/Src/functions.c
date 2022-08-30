@@ -42,136 +42,154 @@ const EngineSpeedBlock Init_PulseSettings = {131,54784,10, 16640,
 		                                       3,24930, 0, 17230,
 		                                       3,19392, 0, 16800};
 
-uint8_t rpm_line=0;
+uint8_t rpm_line=0u;
 EngineSpeedBlock EngineSpeedUnion;
 PulseSettings EngineSpeedCurve[40];
 
+enum Pulse_Polarity Polarity=FallPulse;
+enum Output OutputCtrl=same;
+
+//Period
+uint8_t program_TMR3=0b11;
+uint8_t flg_time_is_over_TMR3=1u;
 uint16_t nOverflowTMR3=0u;
 uint16_t nTargetOverflowTMR3=0u;
 uint16_t nTargetRemainTMR3=0u;
-enum StateMachinePulse ManagePulsePeriod=Overflow;
 
 //Pulse Duty cycle
+uint8_t program_TMR4=0b01;
 uint16_t nOverflowTMR4=0u;
 uint16_t nTargetOverflowTMR4=0u;
 uint16_t nTargetRemainTMR4=0u;
-enum StateMachinePulse ManageDutyPulse=Overflow;
 
-void InitializeEngineSpeedTable(void)
+void Set_Output(enum Pulse_Polarity Polarity, enum Output OutputCtrl)
 {
-	uint16_t i;
-	uint16_t f = sizeof(EngineSpeedCurve);
-
-	for(i=0;i<f;i++)
+	if(OutputCtrl==inverted)
 	{
-		EngineSpeedUnion.Array_EngineSpeedCurveAsBlock[i]=Init_PulseSettings.Array_EngineSpeedCurveAsBlock[i];
+		(Polarity==FallPulse)?(Polarity=RisePulse):(Polarity=FallPulse);
+	}
+
+	if(Polarity==FallPulse)
+	{
+		HAL_GPIO_WritePin(GPIOC,GPIO_PIN_14,GPIO_PIN_SET);
+	}
+	else
+	{
+		HAL_GPIO_WritePin(GPIOC,GPIO_PIN_14,GPIO_PIN_RESET);
 	}
 }
 
-void SetPulseTMR3(void)
+void InitializeEngineSpeedTable(void)
 {
-	HAL_GPIO_WritePin(GPIOC,GPIO_PIN_13|GPIO_PIN_14,GPIO_PIN_SET);
-	__HAL_TIM_SET_COMPARE(&htim3,TIM_CHANNEL_1,65535u);
-	nOverflowTMR3=0;
+	uint16_t index;
+	uint16_t number_of_bytes;
+
+	number_of_bytes=sizeof(EngineSpeedCurve);
+
+	for(index=0;index<number_of_bytes;index++)
+	{
+		EngineSpeedUnion.Array_EngineSpeedCurveAsBlock[index]=Init_PulseSettings.Array_EngineSpeedCurveAsBlock[index];
+	}
 }
 
 void ChangeTableLine(uint8_t line)
 {
 	nTargetOverflowTMR3=EngineSpeedUnion.EngineSpeedCurve[line].nTargetOverflowTMR3;
 	nTargetRemainTMR3=EngineSpeedUnion.EngineSpeedCurve[line].nTargetRemainTMR3;
+
+	program_TMR3=0b00;
+
+	(nTargetOverflowTMR3==0)?(program_TMR3=0b00):(program_TMR3=0b10);
+	(nTargetRemainTMR3==0)?(program_TMR3=program_TMR3&0b10):(program_TMR3=program_TMR3|0b01);
+
 	nTargetOverflowTMR4=EngineSpeedUnion.EngineSpeedCurve[line].nTargetOverflowTMR4;
 	nTargetRemainTMR4=EngineSpeedUnion.EngineSpeedCurve[line].nTargetRemainTMR4;
-}
 
-void ProgramTMR4(void)
-{
-	HAL_TIM_OC_Start_IT(&htim4,TIM_CHANNEL_1);
-	__HAL_TIM_SET_COUNTER(&htim4,0u);
+	program_TMR4=0b00;
 
-	if(nOverflowTMR4==0)
-	{
-		__HAL_TIM_SET_COMPARE(&htim4,TIM_CHANNEL_1,nTargetRemainTMR4);
-		ManageDutyPulse=Remain;
-	}
-	else
-	{
-		__HAL_TIM_SET_COMPARE(&htim4,TIM_CHANNEL_1,65535u);
-	}
-
-	ManageDutyPulse=Overflow;
-	nOverflowTMR4=0;
-}
-
-void ResetPulseTMR4(void)
-{
-	HAL_GPIO_WritePin(GPIOC,GPIO_PIN_13|GPIO_PIN_14,GPIO_PIN_RESET);
-	HAL_TIM_OC_Stop_IT(&htim4,TIM_CHANNEL_1);
-	nOverflowTMR4=0;
+	(nTargetOverflowTMR4==0)?(program_TMR4=0b00):(program_TMR4=0b00000010);
+	(nTargetRemainTMR4==0)?(program_TMR4=program_TMR4&0b10):(program_TMR4=program_TMR4|0b01);
 }
 
 void GeneratePeriod(void)
 {
-	switch(ManagePulsePeriod)
+	switch(program_TMR3)
 	{
-		case Overflow: 	if(nOverflowTMR3==nTargetOverflowTMR3)
-						{
-							__HAL_TIM_SET_COUNTER(&htim3,0u);
+		case 0b00:	// (nOverflowTMR3==0) && (nTargetRemainTMR3==0)    Do nothing...
+					break;
 
-							if(nTargetRemainTMR3==0)
-							{
-								SetPulseTMR3();
-								ChangeTableLine(rpm_line);
-								ProgramTMR4();
-							}
-							else
-							{
-								ManagePulsePeriod=Remain;
-								__HAL_TIM_SET_COMPARE(&htim3,TIM_CHANNEL_1,nTargetRemainTMR3);
-							}
-						}
+		case 0b01:	// (nOverflowTMR3==0) && (nTargetRemainTMR3!=0)
+					HAL_GPIO_TogglePin(GPIOC,GPIO_PIN_13);
+					flg_time_is_over_TMR3=1u;
+					program_TMR3=0b00;
+					break;
 
-						nOverflowTMR3++;
+		case 0b10:	// (nOverflowTMR3!=0) && (nTargetRemainTMR3==0)
+					nOverflowTMR3++;
 
-						break;
+					if(nOverflowTMR3==nTargetOverflowTMR3)
+					{
+						HAL_GPIO_TogglePin(GPIOC,GPIO_PIN_13);
+						flg_time_is_over_TMR3=1u;
+						program_TMR3=0b00;
+					}
 
-		case Remain:	SetPulseTMR3();
-						ChangeTableLine(rpm_line);
-						ProgramTMR4();
-						ManagePulsePeriod=Overflow;
-						break;
+					break;
 
-		default: 		break;
+		case 0b11:	// (nOverflowTMR3!=0) && (nTargetRemainTMR3!=0)
+					nOverflowTMR3++;
+
+					if(nOverflowTMR3==nTargetOverflowTMR3)
+					{
+						__HAL_TIM_SET_COMPARE(&htim3,TIM_CHANNEL_1,nTargetRemainTMR3);
+						program_TMR3=0b01;
+					}
+
+					break;
+
+		default:    break;
 	}
 }
 
 void GenerateTooth(void)
 {
-	switch(ManageDutyPulse)
+	switch(program_TMR4)
 	{
-		case Overflow: 	if(nOverflowTMR4==nTargetOverflowTMR4)
-						{
-							__HAL_TIM_SET_COUNTER(&htim4,0u);
+		case 0b00:	// (nOverflowTMR4==0) && (nTargetRemainTMR4==0)    Do nothing...
+					break;
 
-							if(nTargetRemainTMR4==0)
-							{
-								ResetPulseTMR4();
-							}
-							else
-							{
-								ManageDutyPulse=Remain;
-								__HAL_TIM_SET_COMPARE(&htim4,TIM_CHANNEL_1,nTargetRemainTMR4);
-							}
-						}
+		case 0b01:	// (nOverflowTMR4==0) && (nTargetRemainTMR4!=0)
+					Set_Output(Polarity,same);
 
-						nOverflowTMR4++;
+					HAL_TIM_OC_Stop_IT(&htim4,TIM_CHANNEL_1);
+					program_TMR4=0b00;
+					break;
 
-						break;
+		case 0b10:	// (nOverflowTMR4!=0) && (nTargetRemainTMR4==0)
+					nOverflowTMR4++;
 
-		case Remain:	ResetPulseTMR4();
-						ManageDutyPulse=Overflow;
-						break;
+					if(nOverflowTMR4==nTargetOverflowTMR4)
+					{
+						Set_Output(Polarity,same);
 
-		default: 		break;
+						HAL_TIM_OC_Stop_IT(&htim4,TIM_CHANNEL_1);
+						program_TMR4=0b00;
+					}
+
+					break;
+
+		case 0b11:	// (nOverflowTMR4!=0) && (nTargetRemainTMR4!=0)
+					nOverflowTMR4++;
+
+					if(nOverflowTMR4==nTargetOverflowTMR4)
+					{
+						__HAL_TIM_SET_COMPARE(&htim4,TIM_CHANNEL_1,nTargetRemainTMR4);
+						program_TMR4=0b01;
+					}
+
+					break;
+
+		default:    break;
 	}
 }
 
@@ -191,25 +209,59 @@ void HAL_TIM_OC_DelayElapsedCallback(TIM_HandleTypeDef *htim)
 }
 
 
-/*
- 	//Start
- 	HAL_GPIO_WritePin(GPIOC,GPIO_PIN_13,GPIO_PIN_RESET);
- 	HAL_GPIO_WritePin(GPIOC,GPIO_PIN_13|GPIO_PIN_14,GPIO_PIN_SET);
- 	ChangeTableLine(0);
 
- 	//Treat interrupt
- 	void GeneratePeriod(void)
-	{
- 		if((nOverflowTMR3==0)&&(nTargetRemainTMR3!=0))
-		{
- 			__HAL_TIM_SET_COMPARE(&htim3,TIM_CHANNEL_1,nTargetRemainTMR3);
- 		}
 
- 		if((nOverflowTMR3!=0)&&(nTargetRemainTMR3==0))
- 		{
- 			if(nOverflowTMR3==nTargetOverflowTMR3)
-			{
- 				HAL_GPIO_Toggle((GPIOC,GPIO_PIN_13);
- 			}
- 		}
- */
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -24,6 +24,8 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 
+uint8_t cycles;  //Number of cycles with the same engine speed
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -95,14 +97,24 @@ int main(void)
   /* USER CODE BEGIN 2 */
 
   //Interruption
+  HAL_TIM_OC_Start_IT(&htim3, TIM_CHANNEL_1);  //Period
+  HAL_TIM_OC_Start_IT(&htim4, TIM_CHANNEL_1);  //Duty pulse
 
-  HAL_TIM_OC_Start_IT(&htim3, TIM_CHANNEL_1);
-  __HAL_TIM_SET_COMPARE(&htim3,TIM_CHANNEL_1,65534u);
-  __HAL_TIM_SET_COUNTER(&htim3,65535u);
-
+  //Initialize table with engine speed target
   InitializeEngineSpeedTable();
-  rpm_line=11;
+
+  //Define which line will be executed firstly (to initiate the generator)
   ChangeTableLine(rpm_line);
+
+  //Program TMR3 for the first overflow
+  __HAL_TIM_SET_COUNTER(&htim3,0u);
+  __HAL_TIM_SET_COMPARE(&htim3,TIM_CHANNEL_1,nTargetRemainTMR3);
+
+  //Program TMR4 for the first overflow
+  __HAL_TIM_SET_COUNTER(&htim4,0u);
+  __HAL_TIM_SET_COMPARE(&htim4,TIM_CHANNEL_1,nTargetRemainTMR4);
+
+  Set_Output(Polarity,same);
 
   /* USER CODE END 2 */
 
@@ -111,16 +123,41 @@ int main(void)
   while (1)
   {
 	  //My Code...
-	  /*
-	  HAL_Delay(1000);
-	  rpm_line++;
-
-	  if(rpm_line==40)
+	  if(flg_time_is_over_TMR3!=0)
 	  {
-		  rpm_line=0;
+		  cycles++;
+
+		  //TMR3
+		  __HAL_TIM_SET_COUNTER(&htim3,0u);
+		  flg_time_is_over_TMR3=0u;
+
+		  if(cycles>50u)
+		  {
+			  if(rpm_line<39u)
+			  {
+				  rpm_line++;
+			  }
+			  else
+			  {
+				  rpm_line=0u;
+			  }
+
+			  cycles=0u;
+		  }
+
 		  ChangeTableLine(rpm_line);
+		  __HAL_TIM_SET_COMPARE(&htim3,TIM_CHANNEL_1,nTargetRemainTMR3);
+		  nOverflowTMR3=0;
+
+		  //TMR4
+		  HAL_TIM_OC_Start_IT(&htim4,TIM_CHANNEL_1);
+		  __HAL_TIM_SET_COUNTER(&htim4,0u);
+
+		  Set_Output(Polarity,inverted);
+
+		  __HAL_TIM_SET_COMPARE(&htim4,TIM_CHANNEL_1,nTargetRemainTMR4);
+		  nOverflowTMR4=0u;
 	  }
-	  */
 
     /* USER CODE END WHILE */
 
